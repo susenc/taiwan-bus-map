@@ -3,13 +3,13 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>全台公車路線地圖 (正式上線版)</title>
+    <title>全台公車路線地圖</title>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <style>
         body { margin: 0; display: flex; height: 100vh; font-family: "Microsoft JhengHei", "Heiti TC", sans-serif; overflow: hidden; }
         
         #sidebar { 
-            width: 420px; min-width: 350px; max-width: 800px;
+            width: 360px; min-width: 300px; max-width: 800px;
             background: #fff; z-index: 2000; display: flex; flex-direction: column; flex-shrink: 0; 
         }
 
@@ -102,7 +102,7 @@
         .legend-line { height: 8px; width: 60px; margin-left: 15px; border-radius: 4px; display: inline-block; }
         #debug-info { padding: 10px; background: #fff3cd; color: #856404; font-size: 12px; border-bottom: 1px solid #ffeeba; display: none;}
         
-        /* 地圖標籤樣式 */
+        /* 標籤樣式 */
         .route-label {
             background: transparent !important; 
             border: none !important; 
@@ -114,7 +114,6 @@
             pointer-events: none; 
             opacity: 1 !important;
         }
-        /* 修正: 文字垂直堆疊 */
         .draggable-label {
              display: flex; flex-direction: column; align-items: center; line-height: 1.1;
         }
@@ -150,7 +149,7 @@
     <script>
         var map = L.map('map', { center: [23.97565, 120.97388], zoom: 7 }); 
         
-        // 【關鍵修改】改用 CartoDB Positron 底圖 (免費、無Key、淡色系)
+        // 【關鍵修改】改用 CartoDB Positron (淡灰色、免費、有中文)
         L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
             attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
             subdomains: 'abcd',
@@ -348,7 +347,6 @@
 
             var controls = document.createElement('div');
             controls.className = 'style-controls';
-            
             var colorInput = document.createElement('input');
             colorInput.type = 'color'; colorInput.value = color;
             colorInput.title = "更改顏色";
