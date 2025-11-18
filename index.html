@@ -3,13 +3,13 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>全台公車路線地圖</title>
+    <title>全台公車路線地圖 (正式穩定版)</title>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <style>
         body { margin: 0; display: flex; height: 100vh; font-family: "Microsoft JhengHei", "Heiti TC", sans-serif; overflow: hidden; }
         
         #sidebar { 
-            width: 360px; min-width: 300px; max-width: 800px;
+            width: 420px; min-width: 350px; max-width: 800px;
             background: #fff; z-index: 2000; display: flex; flex-direction: column; flex-shrink: 0; 
         }
 
@@ -109,10 +109,17 @@
             box-shadow: none !important; 
             font-weight: normal !important; 
             font-family: "Microsoft JhengHei", "Arial", sans-serif;
-            white-space: nowrap; 
-            text-shadow: 3px 0 #fff, -3px 0 #fff, 0 3px #fff, 0 -3px #fff, 2px 2px #fff, -2px -2px #fff, 2px -2px #fff, -2px 2px #fff, 1px 1px #fff, -1px -1px #fff, 1px -1px #fff, -1px 1px #fff;
+            white-space: nowrap !important; /* 強制不換行 (橫式) */
+            
+            /* 強力白邊 (Halo) */
+            text-shadow: 
+                3px 0 #fff, -3px 0 #fff, 0 3px #fff, 0 -3px #fff,
+                2px 2px #fff, -2px -2px #fff, 2px -2px #fff, -2px 2px #fff,
+                1px 1px #fff, -1px -1px #fff, 1px -1px #fff, -1px 1px #fff;
+                
             pointer-events: none; 
             opacity: 1 !important;
+            transition: font-size 0.1s ease-out; /* 平滑縮放 */
         }
         .draggable-label {
              display: flex; flex-direction: column; align-items: center; line-height: 1.1;
@@ -147,13 +154,12 @@
 
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script>
-        var map = L.map('map', { center: [23.97565, 120.97388], zoom: 7 }); 
+        var map = L.map('map', { center: [23.97565, 120.97388], zoom: 8 }); 
         
-        // 【關鍵修改】改用 CartoDB Positron (淡灰色、免費、有中文)
-        L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
-            attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
-            subdomains: 'abcd',
-            maxZoom: 20
+        // 【關鍵】使用標準 OpenStreetMap，保證免費、無401、且永遠顯示中文
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            maxZoom: 19,
+            attribution: '&copy; OpenStreetMap contributors'
         }).addTo(map);
 
         const sidebar = document.getElementById('sidebar');
@@ -177,6 +183,31 @@
             return div;
         };
         legend.addTo(map);
+
+        // --- 智慧縮放字體 ---
+        map.on('zoomend', function() {
+            var currentZoom = map.getZoom();
+            Object.keys(activeLayers).forEach(function(key) {
+                var obj = activeLayers[key];
+                if (obj.labelMarker) {
+                    updateLabelSize(obj, currentZoom);
+                }
+            });
+        });
+
+        function updateLabelSize(obj, zoom) {
+            // 縮放係數: 基準 Zoom 12
+            var scaleFactor = Math.pow(1.15, zoom - 12); 
+            var newSize = Math.max(10, obj.baseFontSize * scaleFactor); // 最小 10px
+            
+            var el = obj.labelMarker.getElement();
+            if (el) {
+                var innerSpan = el.querySelector('.draggable-label');
+                if (innerSpan) {
+                    innerSpan.style.fontSize = newSize + 'px';
+                }
+            }
+        }
 
         function updateLegend() {
             var container = document.getElementById('legend-content');
@@ -285,8 +316,9 @@
 
         function addRouteFromSelect() { var name = document.getElementById('routeSelect').value; var op = document.getElementById('operatorSelect').value; executeAddRoute(name, op, false); }
 
+        // 【修正】改回 formatRouteName，但這次是為了移除它，強制橫式
         function formatRouteName(name) {
-            return name.replace('(', '<br>(');
+            return name; // 不做任何換行處理
         }
 
         function executeAddRoute(name, opIdentifier, isRawOp) {
@@ -304,7 +336,7 @@
 
             var color = '#' + Math.floor(Math.random()*16777215).toString(16).padStart(6, '0');
             var weight = 5;
-            var fontSize = 40;
+            var fontSize = 40; // 預設字體 40px
 
             var layer = L.geoJSON(features, { style: { color: color, weight: weight, opacity: 0.8 }, onEachFeature: function(feature, layer) { layer.bindPopup(`<b>${name}</b><br>${feature.properties.Operator}<br>(${feature.properties.City})`); } }).addTo(map);
             
@@ -325,10 +357,17 @@
                 labelMarker = L.marker(centerLatLng, { icon: myIcon, draggable: true, autoPan: true }).addTo(map);
             }
 
-            activeLayers[uniqueKey] = { layer: layer, color: color, weight: weight, fontSize: fontSize, name: name, labelMarker: labelMarker };
+            activeLayers[uniqueKey] = { 
+                layer: layer, color: color, weight: weight, 
+                baseFontSize: fontSize, // 儲存基礎字體大小，用於縮放計算
+                name: name, labelMarker: labelMarker 
+            };
             map.fitBounds(layer.getBounds());
             createRouteCard(uniqueKey, name, opIdentifier, color, weight, fontSize);
             updateLegend();
+            
+            // 加入後立即更新一次大小
+            if (labelMarker) updateLabelSize(activeLayers[uniqueKey], map.getZoom());
         }
 
         function createRouteCard(key, name, opText, color, weight, fontSize) {
@@ -367,7 +406,8 @@
             sizeGroup.className = 'slider-group';
             sizeGroup.innerHTML = `<svg class="slider-icon" viewBox="0 0 24 24"><path d="M2.5 4v3h5v12h3V7h5V4h-13zm19 5h-9v3h3v7h3v-7h3V9z"/></svg>`;
             var sizeInput = document.createElement('input');
-            sizeInput.type = 'range'; sizeInput.min = '12'; sizeInput.max = '80'; sizeInput.value = fontSize;
+            sizeInput.type = 'range'; sizeInput.min = '12'; sizeInput.max = '120'; /* 允許拉更大 */
+            sizeInput.value = fontSize;
             sizeInput.oninput = function() { updateRouteStyle(key, colorInput.value, weightInput.value, this.value); };
             sizeGroup.appendChild(sizeInput);
 
@@ -391,9 +431,18 @@
                 newWeight = parseInt(newWeight);
                 newSize = parseInt(newSize);
                 var obj = activeLayers[key];
+                
                 obj.layer.setStyle({ color: newColor, weight: newWeight });
+                
+                // 更新設定值
+                obj.color = newColor; 
+                obj.weight = newWeight; 
+                obj.baseFontSize = newSize;
+
+                // 更新標籤
                 if (obj.labelMarker) {
                     var formattedName = formatRouteName(obj.name);
+                    // 立即更新圖示 HTML
                     var newIcon = L.divIcon({
                         className: 'custom-label-icon',
                         html: `<div class="draggable-label" style="color: ${newColor}; font-size: ${newSize}px;">${formattedName}</div>`,
@@ -401,8 +450,11 @@
                         iconAnchor: [20, 10]
                     });
                     obj.labelMarker.setIcon(newIcon);
+                    
+                    // 根據當前縮放層級重新計算一次大小 (避免拉動拉桿後縮放邏輯失效)
+                    updateLabelSize(obj, map.getZoom());
                 }
-                obj.color = newColor; obj.weight = newWeight; obj.fontSize = newSize;
+
                 document.getElementById('card-' + key).style.setProperty('--route-color', newColor);
                 updateLegend();
             }
