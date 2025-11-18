@@ -1,0 +1,432 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>全台公車路線地圖</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <style>
+        body { margin: 0; display: flex; height: 100vh; font-family: "Microsoft JhengHei", "Heiti TC", sans-serif; overflow: hidden; }
+        
+        #sidebar { 
+            width: 400px; /* 預設寬一點，避免擠壓 */
+            min-width: 300px; max-width: 800px;
+            background: #fff; z-index: 2000; display: flex; flex-direction: column; flex-shrink: 0; 
+        }
+
+        #resizer {
+            width: 8px; background-color: #f1f1f1; border-left: 1px solid #ddd; border-right: 1px solid #ddd;
+            cursor: col-resize; flex-shrink: 0; display: flex; align-items: center; justify-content: center;
+            transition: background-color 0.2s; z-index: 2001; 
+        }
+        #resizer:hover, #resizer.active { background-color: #ccc; }
+        #resizer::after { content: "|||"; color: #999; font-size: 10px; font-weight: bold; letter-spacing: 1px; transform: rotate(90deg); }
+
+        .header { padding: 20px; background: #007bff; color: white; }
+        .controls { padding: 20px; border-bottom: 1px solid #eee; }
+        
+        label { font-size: 13px; color: #666; font-weight: bold; display: block; margin-bottom: 5px; }
+        select, button, input[type="text"] { width: 100%; padding: 10px; margin-bottom: 15px; border: 1px solid #ddd; border-radius: 6px; box-sizing: border-box; }
+        button#btnAdd { background: #28a745; color: white; border: none; cursor: pointer; font-size: 16px; }
+        button#btnAdd:disabled { background: #ccc; cursor: not-allowed; }
+
+        optgroup { background-color: #e6f3ff; color: #0056b3; font-weight: bold; padding: 5px; }
+        option { background-color: #fff; color: #333; padding: 5px; }
+        
+        .search-box { position: relative; margin-bottom: 20px; border-bottom: 2px solid #f0f0f0; padding-bottom: 10px; }
+        #searchInput { margin-bottom: 0; border: 2px solid #007bff; }
+        #searchResults {
+            position: absolute; top: 70px; left: 0; width: 100%; max-height: 250px; overflow-y: auto;
+            background: white; border: 1px solid #ccc; border-top: none; box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+            z-index: 3000; display: none; border-radius: 0 0 6px 6px;
+        }
+        .result-item { padding: 10px; cursor: pointer; border-bottom: 1px solid #eee; display: flex; justify-content: space-between; align-items: center;}
+        .result-item:hover { background-color: #f1f8ff; }
+        .result-name { font-weight: bold; color: #007bff; }
+        .result-op { font-size: 12px; color: #888; }
+
+        #operatorInfo {
+            margin-top: -10px; margin-bottom: 15px; padding: 8px; background: #e9ecef;
+            border-radius: 4px; font-size: 13px; color: #495057; line-height: 1.5; display: none;
+        }
+        .info-title { font-weight: bold; color: #007bff; margin-right: 5px; }
+
+        #route-list { flex: 1; overflow-y: auto; padding: 20px; background: #f8f9fa; }
+
+        /* 卡片樣式 */
+        .route-item { 
+            background: white; padding: 12px 15px; margin-bottom: 12px; border-radius: 10px;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.08); border: 1px solid #eee; 
+            border-left: 8px solid var(--route-color, #ccc); 
+            transition: border-color 0.3s, box-shadow 0.3s;
+            display: flex; align-items: center; gap: 15px; overflow: hidden; 
+            min-height: 50px; 
+        }
+        .route-item:hover { box-shadow: 0 4px 12px rgba(0,0,0,0.12); }
+
+        .route-info { display: flex; flex-direction: column; justify-content: center; width: 85px; flex-shrink: 0; overflow: hidden; }
+        .route-name-display { font-size: 24px; font-weight: bold; color: #000; line-height: 1; white-space: nowrap; text-overflow: ellipsis; overflow: hidden; }
+        .route-op-display { font-size: 12px; color: #888; margin-top: 2px; line-height: 1; white-space: nowrap; text-overflow: ellipsis; overflow: hidden; }
+
+        .style-controls {
+            flex-grow: 1; flex-shrink: 1; min-width: 100px; display: flex; align-items: center; gap: 8px; padding: 0; height: 100%; 
+        }
+        input[type="color"] { border: 1px solid #ddd; width: 28px; height: 28px; cursor: pointer; background: none; padding: 0; border-radius: 4px; flex-shrink: 0; }
+        
+        .sliders-container {
+            display: flex; flex-direction: column; justify-content: center; gap: 6px; flex-grow: 1; width: 100%;
+        }
+        .slider-group { display: flex; align-items: center; gap: 6px; width: 100%; height: 16px; }
+        .slider-icon { width: 12px; height: 12px; fill: #888; flex-shrink: 0; }
+
+        input[type="range"] { 
+            flex-grow: 1; cursor: pointer; height: 4px; background: #e0e0e0; border-radius: 2px; outline: none; -webkit-appearance: none; margin: 0; display: block;
+        }
+        input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none; width: 14px; height: 14px; background: #666; border-radius: 50%; cursor: pointer;
+            border: 2px solid #fff; box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+        }
+
+        .btn-del { 
+            border: none; background: none; cursor: pointer; padding: 0; margin: 0;
+            flex-shrink: 0; width: 36px; height: 36px; display: flex; align-items: center; justify-content: center;
+            border-radius: 50%; transition: background-color 0.2s; line-height: 0; 
+        }
+        .btn-del svg { width: 18px; height: 18px; fill: #aaa; transition: fill 0.2s; display: block; }
+        .btn-del:hover { background-color: #fff0f0; }
+        .btn-del:hover svg { fill: #ff4d4d; }
+
+        #map { flex: 1; height: 100%; }
+        .legend { background: white; padding: 15px 20px; line-height: 1.5; color: #333; box-shadow: 0 0 15px rgba(0,0,0,0.2); border-radius: 8px; min-width: 220px; }
+        .legend h4 { margin: 0 0 10px 0; font-size: 18px; font-weight: bold; border-bottom: 1px solid #eee; padding-bottom: 8px;}
+        .legend-item { display: flex; align-items: center; margin-bottom: 8px; font-size: 16px; justify-content: space-between;}
+        .legend-line { height: 8px; width: 60px; margin-left: 15px; border-radius: 4px; display: inline-block; }
+        #debug-info { padding: 10px; background: #fff3cd; color: #856404; font-size: 12px; border-bottom: 1px solid #ffeeba; display: none;}
+        
+        /* --- 【關鍵修改 1】樣式設定 --- */
+        .draggable-label {
+            font-weight: normal; 
+            font-family: "Microsoft JhengHei", "Arial", sans-serif;
+            text-align: center; /* 文字置中對齊 */
+            line-height: 1.1;   /* 行高緊湊一點 */
+            
+            /* 允許換行 */
+            white-space: pre-wrap !important; 
+            
+            cursor: grab; 
+            user-select: none;
+            
+            /* 強力白邊 */
+            text-shadow: 
+                3px 0 #fff, -3px 0 #fff, 0 3px #fff, 0 -3px #fff,
+                2px 2px #fff, -2px -2px #fff, 2px -2px #fff, -2px 2px #fff,
+                1px 1px #fff, -1px -1px #fff, 1px -1px #fff, -1px 1px #fff;
+        }
+        .draggable-label:active { cursor: grabbing; }
+        .leaflet-div-icon { background: transparent; border: none; }
+    </style>
+</head>
+<body>
+
+    <div id="sidebar">
+        <div class="header"><h1 style="margin:0; font-size:20px;">🚌 全台公車地圖</h1></div>
+        <div id="debug-info">系統訊息：初始化中...</div>
+        <div class="controls">
+            <div class="search-box">
+                <label>🔍 快速搜尋</label>
+                <input type="text" id="searchInput" placeholder="輸入路線 (如: 307, 統聯)..." autocomplete="off">
+                <div id="searchResults"></div>
+            </div>
+
+            <label>1. 選擇客運業者 (地區分類)</label>
+            <select id="operatorSelect"><option value="">載入中...</option></select>
+            <div id="operatorInfo"></div>
+
+            <label>2. 選擇路線</label>
+            <select id="routeSelect" disabled><option value="">請先選擇業者</option></select>
+            <button id="btnAdd" onclick="addRouteFromSelect()" disabled>+ 加入地圖</button>
+        </div>
+        <div id="route-list"></div>
+    </div>
+    <div id="resizer"></div>
+    <div id="map"></div>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script>
+        var map = L.map('map', { center: [23.97565, 120.97388], zoom: 7 }); 
+        L.tileLayer('https://tiles.stadiamaps.com/tiles/osm_bright/{z}/{x}/{y}{r}.png', { maxZoom: 20, attribution: '&copy; OpenStreetMap' }).addTo(map);
+
+        const sidebar = document.getElementById('sidebar');
+        const resizer = document.getElementById('resizer');
+        let isResizing = false;
+        resizer.addEventListener('mousedown', (e) => { isResizing = true; resizer.classList.add('active'); document.body.style.cursor = 'col-resize'; document.addEventListener('mousemove', handleMouseMove); document.addEventListener('mouseup', stopResize); e.preventDefault(); });
+        function handleMouseMove(e) { if (!isResizing) return; let newWidth = e.clientX; if (newWidth < 250) newWidth = 250; if (newWidth > 800) newWidth = 800; sidebar.style.width = newWidth + 'px'; }
+        function stopResize() { isResizing = false; resizer.classList.remove('active'); document.body.style.cursor = 'default'; document.removeEventListener('mousemove', handleMouseMove); document.removeEventListener('mouseup', stopResize); map.invalidateSize(); }
+
+        var geoData = null;
+        var busStructure = {}; 
+        var operatorLocations = {};
+        var activeLayers = {}; 
+        var allRouteNames = []; 
+
+        var legend = L.control({position: 'topright'});
+        legend.onAdd = function (map) {
+            var div = L.DomUtil.create('div', 'legend');
+            div.id = 'map-legend';
+            div.innerHTML = '<h4>圖例</h4><div id="legend-content">無顯示路線</div>';
+            return div;
+        };
+        legend.addTo(map);
+
+        function updateLegend() {
+            var container = document.getElementById('legend-content');
+            var routes = Object.keys(activeLayers);
+            if (routes.length === 0) { container.innerHTML = '<span style="color:#999">無顯示路線</span>'; return; }
+            var html = '';
+            routes.forEach(key => {
+                var o = activeLayers[key];
+                var h = Math.max(2, Math.min(12, o.weight));
+                html += `<div class="legend-item"><span>${o.name}</span><span class="legend-line" style="background:${o.color}; height:${h}px;"></span></div>`;
+            });
+            container.innerHTML = html;
+        }
+
+        function showMsg(msg, isError=false) {
+            var d = document.getElementById('debug-info');
+            d.style.display = 'block'; d.innerText = msg;
+            d.style.background = isError ? '#f8d7da' : '#d4edda'; d.style.color = isError ? '#721c24' : '#155724';
+        }
+
+        var fileUrl = 'data/bus_web.geojson?t=' + new Date().getTime();
+        fetch(fileUrl).then(res => res.json()).then(data => {
+            geoData = data;
+            if (!data.features || data.features.length === 0) { showMsg("⚠️ 無資料！", true); return; }
+            document.getElementById('operatorSelect').innerHTML = '<option value="">請選擇業者</option>';
+            processData(); showMsg("✅ 資料載入成功！共 " + data.features.length + " 筆");
+        }).catch(err => showMsg("❌ 讀取失敗：" + err, true));
+
+        const REGIONS = {
+            "北部地區": ["臺北市", "Taipei", "新北市", "NewTaipei", "基隆市", "Keelung", "桃園市", "Taoyuan", "新竹市", "Hsinchu", "新竹縣", "HsinchuCounty", "苗栗縣", "MiaoliCounty"],
+            "中部地區": ["臺中市", "Taichung", "彰化縣", "ChanghuaCounty", "南投縣", "NantouCounty", "雲林縣", "YunlinCounty", "嘉義市", "Chiayi", "嘉義縣", "ChiayiCounty"],
+            "南部地區": ["臺南市", "Tainan", "高雄市", "Kaohsiung", "屏東縣", "PingtungCounty"],
+            "東部與離島": ["宜蘭縣", "YilanCounty", "花蓮縣", "HualienCounty", "臺東縣", "TaitungCounty", "金門縣", "KinmenCounty", "澎湖縣", "PenghuCounty", "連江縣", "LienchiangCounty"],
+            "公路/跨區": ["公路/跨縣市", "公路客運", "InterCity"]
+        };
+
+        function getRegion(city) {
+            if (!city) return "其他地區";
+            for (let [region, cities] of Object.entries(REGIONS)) { if (cities.includes(city)) return region; }
+            return "其他地區";
+        }
+
+        function getAggregatedOpName(rawOp, city) {
+            var region = getRegion(city); rawOp = rawOp || "其他業者";
+            if (rawOp.includes(" + ")) return `🔄 ${region}聯營公車`;
+            if (rawOp.includes("公所") || rawOp.includes("政府") || rawOp.includes("社區巴士") || rawOp.includes("免費") || rawOp.includes("醫療專車")) return `🏛️ ${region}公部門/社區巴士`;
+            return rawOp;
+        }
+
+        function processData() {
+            busStructure = {}; operatorLocations = {}; allRouteNames = []; var uniqueRoutes = new Set(); 
+            var regionGroups = { "北部地區": new Set(), "中部地區": new Set(), "南部地區": new Set(), "東部與離島": new Set(), "公路/跨區": new Set(), "其他地區": new Set() };
+
+            geoData.features.forEach(f => {
+                var p = f.properties; var rawOp = p.Operator || "其他業者"; var name = p.RouteName || "未命名"; var city = p.City || "未知地區"; 
+                var uniqueKey = name + "|" + rawOp;
+                if (!uniqueRoutes.has(uniqueKey)) { uniqueRoutes.add(uniqueKey); allRouteNames.push({ name: name, op: rawOp }); }
+                var finalOp = getAggregatedOpName(rawOp, city);
+                if (!busStructure[finalOp]) busStructure[finalOp] = new Set(); busStructure[finalOp].add(name);
+                if (!operatorLocations[finalOp]) operatorLocations[finalOp] = new Set(); operatorLocations[finalOp].add(city);
+                var region = getRegion(city);
+                if (regionGroups[region]) regionGroups[region].add(finalOp); else regionGroups["其他地區"].add(finalOp);
+            });
+
+            var sel = document.getElementById('operatorSelect');
+            ["北部地區", "中部地區", "南部地區", "東部與離島", "公路/跨區", "其他地區"].forEach(regionName => {
+                var opsSet = regionGroups[regionName];
+                if (opsSet && opsSet.size > 0) {
+                    var group = document.createElement('optgroup'); group.label = regionName; 
+                    var sortedOps = Array.from(opsSet).sort((a, b) => {
+                        var isSpecialA = a.includes("聯營") || a.includes("公部門"); var isSpecialB = b.includes("聯營") || b.includes("公部門");
+                        if (isSpecialA && !isSpecialB) return -1; if (!isSpecialA && isSpecialB) return 1;
+                        return a.localeCompare(b, 'zh-TW');
+                    });
+                    sortedOps.forEach(op => { var opt = document.createElement('option'); opt.value = op; opt.textContent = op; group.appendChild(opt); });
+                    sel.appendChild(group);
+                }
+            });
+        }
+
+        document.getElementById('operatorSelect').addEventListener('change', function() {
+            var op = this.value; var routeSel = document.getElementById('routeSelect'); var btnAdd = document.getElementById('btnAdd'); var infoBox = document.getElementById('operatorInfo');
+            routeSel.innerHTML = '<option value="">請選擇路線</option>'; routeSel.disabled = !op; btnAdd.disabled = true;
+            if (op && busStructure[op]) {
+                var areas = Array.from(operatorLocations[op]).join('、'); infoBox.innerHTML = `<span class="info-title">營運範圍:</span>${areas}`; infoBox.style.display = 'block';
+                Array.from(busStructure[op]).sort((a, b) => a.localeCompare(b, 'zh-Hant-TW', { numeric: true })).forEach(r => { var opt = document.createElement('option'); opt.value = r; opt.textContent = r; routeSel.appendChild(opt); });
+            } else { infoBox.style.display = 'none'; }
+        });
+
+        document.getElementById('routeSelect').addEventListener('change', function() { document.getElementById('btnAdd').disabled = !this.value; });
+        document.getElementById('searchInput').addEventListener('input', function(e) {
+            var val = e.target.value.trim().toUpperCase(); var resultBox = document.getElementById('searchResults');
+            if (!val) { resultBox.style.display = 'none'; return; }
+            var matches = allRouteNames.filter(item => item.name.toUpperCase().includes(val)).slice(0, 50);
+            resultBox.innerHTML = '';
+            if (matches.length > 0) {
+                resultBox.style.display = 'block';
+                matches.forEach(item => {
+                    var div = document.createElement('div'); div.className = 'result-item'; div.innerHTML = `<span class="result-name">${item.name}</span><span class="result-op">${item.op}</span>`;
+                    div.onclick = function() { executeAddRoute(item.name, item.op, true); resultBox.style.display = 'none'; document.getElementById('searchInput').value = ''; };
+                    resultBox.appendChild(div);
+                });
+            } else { resultBox.style.display = 'none'; }
+        });
+        document.addEventListener('click', function(e) { if (!e.target.closest('.search-box')) document.getElementById('searchResults').style.display = 'none'; });
+
+        function addRouteFromSelect() { var name = document.getElementById('routeSelect').value; var op = document.getElementById('operatorSelect').value; executeAddRoute(name, op, false); }
+
+        // --- 【關鍵修改 2】換行格式化邏輯 ---
+        function formatRouteName(name) {
+            // 在左括號前加入換行符號，形成 [路線號] <br> [說明]
+            return name.replace('(', '<br>(');
+        }
+
+        function executeAddRoute(name, opIdentifier, isRawOp) {
+            if (!name) return;
+            var uniqueKey = name + "_" + opIdentifier;
+            if (activeLayers[uniqueKey]) return alert("此路線已加入！");
+
+            var features = geoData.features.filter(f => {
+                if (f.properties.RouteName !== name) return false;
+                var rawOp = f.properties.Operator || "其他業者"; var city = f.properties.City || "未知";
+                return isRawOp ? rawOp === opIdentifier : getAggregatedOpName(rawOp, city) === opIdentifier;
+            });
+
+            if (features.length === 0) return alert("找不到路線資料");
+
+            var color = '#' + Math.floor(Math.random()*16777215).toString(16).padStart(6, '0');
+            var weight = 5;
+            var fontSize = 40; // 預設字體大小
+
+            var layer = L.geoJSON(features, { style: { color: color, weight: weight, opacity: 0.8 }, onEachFeature: function(feature, layer) { layer.bindPopup(`<b>${name}</b><br>${feature.properties.Operator}<br>(${feature.properties.City})`); } }).addTo(map);
+            
+            var longestLayer = null; var maxPoints = 0;
+            layer.eachLayer(function(l) { if (l.getLatLngs && l.getLatLngs().length > maxPoints) { maxPoints = l.getLatLngs().length; longestLayer = l; } });
+            
+            var labelMarker = null;
+            if (longestLayer) {
+                var latlngs = longestLayer.getLatLngs();
+                var centerLatLng = latlngs[Math.floor(latlngs.length / 2)]; 
+                
+                // 使用 formatRouteName
+                var formattedName = formatRouteName(name);
+                
+                var myIcon = L.divIcon({ 
+                    className: 'custom-label-icon', 
+                    html: `<div class="draggable-label" style="color: ${color}; font-size: ${fontSize}px;">${formattedName}</div>`, 
+                    iconSize: [null, null], 
+                    iconAnchor: [20, 10] 
+                });
+                labelMarker = L.marker(centerLatLng, { icon: myIcon, draggable: true, autoPan: true }).addTo(map);
+            }
+
+            activeLayers[uniqueKey] = { layer: layer, color: color, weight: weight, fontSize: fontSize, name: name, labelMarker: labelMarker };
+            map.fitBounds(layer.getBounds());
+            createRouteCard(uniqueKey, name, opIdentifier, color, weight, fontSize);
+            updateLegend();
+        }
+
+        function createRouteCard(key, name, opText, color, weight, fontSize) {
+            var div = document.createElement('div');
+            div.className = 'route-item';
+            div.id = 'card-' + key;
+            div.style.setProperty('--route-color', color);
+
+            var infoDiv = document.createElement('div');
+            infoDiv.className = 'route-info';
+            var nameSpan = document.createElement('span');
+            nameSpan.className = 'route-name-display'; nameSpan.textContent = name;
+            var opSpan = document.createElement('span');
+            opSpan.className = 'route-op-display'; opSpan.textContent = opText;
+            infoDiv.appendChild(nameSpan); infoDiv.appendChild(opSpan);
+
+            var controls = document.createElement('div');
+            controls.className = 'style-controls';
+            
+            var colorInput = document.createElement('input');
+            colorInput.type = 'color'; colorInput.value = color;
+            colorInput.title = "更改顏色";
+            colorInput.oninput = function() { updateRouteStyle(key, this.value, weightInput.value, sizeInput.value); };
+
+            var slidersContainer = document.createElement('div');
+            slidersContainer.className = 'sliders-container';
+
+            var weightGroup = document.createElement('div');
+            weightGroup.className = 'slider-group';
+            weightGroup.innerHTML = `<svg class="slider-icon" viewBox="0 0 24 24"><path d="M3 17h18v-2H3v2zm0 3h18v-1H3v1zm0-7h18v-3H3v3zm0-9v4h18V4H3z"/></svg>`;
+            var weightInput = document.createElement('input');
+            weightInput.type = 'range'; weightInput.min = '1'; weightInput.max = '15'; weightInput.value = weight;
+            weightInput.oninput = function() { updateRouteStyle(key, colorInput.value, this.value, sizeInput.value); };
+            weightGroup.appendChild(weightInput);
+
+            var sizeGroup = document.createElement('div');
+            sizeGroup.className = 'slider-group';
+            sizeGroup.innerHTML = `<svg class="slider-icon" viewBox="0 0 24 24"><path d="M2.5 4v3h5v12h3V7h5V4h-13zm19 5h-9v3h3v7h3v-7h3V9z"/></svg>`;
+            var sizeInput = document.createElement('input');
+            sizeInput.type = 'range'; sizeInput.min = '12'; sizeInput.max = '80'; sizeInput.value = fontSize;
+            sizeInput.oninput = function() { updateRouteStyle(key, colorInput.value, weightInput.value, this.value); };
+            sizeGroup.appendChild(sizeInput);
+
+            slidersContainer.appendChild(weightGroup);
+            slidersContainer.appendChild(sizeGroup);
+            controls.appendChild(colorInput); 
+            controls.appendChild(slidersContainer);
+
+            var btnDel = document.createElement('button');
+            btnDel.className = 'btn-del'; 
+            btnDel.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6v18h18v-18h-18zm5 14c0 .552-.448 1-1 1s-1-.448-1-1v-10c0-.552.448-1 1-1s1 .448 1 1v10zm5 0c0 .552-.448 1-1 1s-1-.448-1-1v-10c0-.552.448-1 1-1s1 .448 1 1v10zm4-18v2h-20v-2h5.711c.9 0 1.631-1.099 1.631-2h5.316c0 .901.73 2 1.631 2h5.711z"/></svg>`;
+            btnDel.onclick = function() { removeRoute(key); };
+
+            div.appendChild(infoDiv); div.appendChild(controls); div.appendChild(btnDel);
+            var list = document.getElementById('route-list');
+            list.insertBefore(div, list.firstChild);
+        }
+
+        function updateRouteStyle(key, newColor, newWeight, newSize) {
+            if (activeLayers[key]) {
+                newWeight = parseInt(newWeight);
+                newSize = parseInt(newSize);
+                var obj = activeLayers[key];
+                
+                obj.layer.setStyle({ color: newColor, weight: newWeight });
+                
+                if (obj.labelMarker) {
+                    var icon = obj.labelMarker.getIcon();
+                    // 更新樣式，同時保持換行邏輯
+                    var formattedName = formatRouteName(obj.name);
+                    var newIcon = L.divIcon({
+                        className: 'custom-label-icon',
+                        html: `<div class="draggable-label" style="color: ${newColor}; font-size: ${newSize}px;">${formattedName}</div>`,
+                        iconSize: [null, null],
+                        iconAnchor: [20, 10]
+                    });
+                    obj.labelMarker.setIcon(newIcon);
+                }
+
+                obj.color = newColor; obj.weight = newWeight; obj.fontSize = newSize;
+                document.getElementById('card-' + key).style.setProperty('--route-color', newColor);
+                updateLegend();
+            }
+        }
+
+        function removeRoute(key) {
+            if (activeLayers[key]) { 
+                map.removeLayer(activeLayers[key].layer); 
+                if (activeLayers[key].labelMarker) map.removeLayer(activeLayers[key].labelMarker);
+                delete activeLayers[key]; 
+            }
+            var card = document.getElementById('card-' + key); if (card) card.remove(); updateLegend();
+        }
+    </script>
+</body>
+</html>
