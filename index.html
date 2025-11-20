@@ -3,8 +3,9 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>全台公車路線地圖 (智慧排版版)</title>
+    <title>全台公車路線地圖 (無縫合併版)</title>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://cdn.jsdelivr.net/npm/@turf/turf@6/turf.min.js"></script>
     <style>
         body { margin: 0; display: flex; height: 100vh; font-family: "Microsoft JhengHei", "Heiti TC", sans-serif; overflow: hidden; }
         
@@ -24,15 +25,27 @@
         .header { padding: 20px; background: #007bff; color: white; }
         .controls { padding: 20px; border-bottom: 1px solid #eee; }
         
-        label { font-size: 13px; color: #666; font-weight: bold; display: block; margin-bottom: 5px; }
-        select, button, input[type="text"] { width: 100%; padding: 10px; margin-bottom: 15px; border: 1px solid #ddd; border-radius: 6px; box-sizing: border-box; }
+        label { font-size: 16px; color: #333; font-weight: bold; display: block; margin-bottom: 5px; margin-top: 15px; }
+        label:first-child { margin-top: 0; }
+
+        select, button, input[type="text"] { width: 100%; padding: 10px; margin-bottom: 10px; border: 1px solid #999; border-radius: 4px; box-sizing: border-box; font-size: 14px; }
+        
+        .district-controls { display: flex; flex-direction: column; gap: 10px; margin-bottom: 10px; }
+        .district-controls select { width: 100%; margin-bottom: 0; }
+
+        .btn-add-district {
+            background-color: #00b050; color: white; border: none; cursor: pointer; 
+            font-size: 24px; font-weight: bold; border-radius: 4px; padding: 5px 0; line-height: 1; margin-bottom: 15px;
+        }
+        .btn-add-district:hover { background-color: #009040; }
+
         button#btnAdd { background: #28a745; color: white; border: none; cursor: pointer; font-size: 16px; }
         button#btnAdd:disabled { background: #ccc; cursor: not-allowed; }
 
         optgroup { background-color: #e6f3ff; color: #0056b3; font-weight: bold; padding: 5px; }
         option { background-color: #fff; color: #333; padding: 5px; }
         
-        .search-box { position: relative; margin-bottom: 20px; border-bottom: 2px solid #f0f0f0; padding-bottom: 10px; }
+        .search-box { position: relative; margin-bottom: 20px; border-bottom: 2px solid #f0f0f0; padding-bottom: 10px; margin-top: 20px; }
         #searchInput { margin-bottom: 0; border: 2px solid #007bff; }
         #searchResults {
             position: absolute; top: 70px; left: 0; width: 100%; max-height: 250px; overflow-y: auto;
@@ -45,7 +58,7 @@
         .result-op { font-size: 12px; color: #888; }
 
         #operatorInfo {
-            margin-top: -10px; margin-bottom: 15px; padding: 8px; background: #e9ecef;
+            margin-top: -5px; margin-bottom: 15px; padding: 8px; background: #e9ecef;
             border-radius: 4px; font-size: 13px; color: #495057; line-height: 1.5; display: none;
         }
         .info-title { font-weight: bold; color: #007bff; margin-right: 5px; }
@@ -88,55 +101,47 @@
 
         .btn-del { 
             border: none; background: none; cursor: pointer; padding: 0; margin: 0;
-            flex-shrink: 0; width: 40px; height: 40px; display: flex; align-items: center; justify-content: center;
+            flex-shrink: 0; width: 36px; height: 36px; display: flex; align-items: center; justify-content: center;
             border-radius: 50%; transition: background-color 0.2s; line-height: 0; 
         }
-        .btn-del svg { width: 20px; height: 20px; fill: #aaa; transition: fill 0.2s; display: block; }
+        .btn-del svg { width: 18px; height: 18px; fill: #aaa; transition: fill 0.2s; display: block; }
         .btn-del:hover { background-color: #fff0f0; }
         .btn-del:hover svg { fill: #ff4d4d; }
 
-        #map { flex: 1; height: 100%; }
-        .legend { background: white; padding: 15px 20px; line-height: 1.5; color: #333; box-shadow: 0 0 15px rgba(0,0,0,0.2); border-radius: 8px; min-width: 220px; }
-        .legend h4 { margin: 0 0 10px 0; font-size: 18px; font-weight: bold; border-bottom: 1px solid #eee; padding-bottom: 8px;}
-        .legend-item { display: flex; align-items: center; margin-bottom: 8px; font-size: 16px; justify-content: space-between;}
-        .legend-line { height: 8px; width: 60px; margin-left: 15px; border-radius: 4px; display: inline-block; }
+        #map { flex: 1; height: 100%; position: relative; z-index: 1; }
+        
+        .landmark-panel { 
+            background: white; padding: 15px; 
+            box-shadow: 0 0 15px rgba(0,0,0,0.3) !important; border-radius: 8px; min-width: 200px; 
+            font-size: 14px; color: #333; cursor: default; z-index: 3000; border: 1px solid #ddd;
+        }
+        .landmark-panel h4 { margin: 0 0 10px 0; font-size: 16px; font-weight: bold; border-bottom: 1px solid #eee; padding-bottom: 8px;}
+        .lm-item { display: flex; align-items: center; margin-bottom: 8px; cursor: pointer; }
+        .lm-item input { margin-right: 8px; cursor: pointer; }
+        .lm-slider-container { margin-top: 10px; border-top: 1px solid #eee; padding-top: 10px; }
+        .lm-slider-label { font-size: 12px; color: #666; margin-bottom: 5px; display: block; }
+
         #debug-info { padding: 10px; background: #fff3cd; color: #856404; font-size: 12px; border-bottom: 1px solid #ffeeba; display: none;}
         
-        /* --- 標籤樣式 (直橫混合) --- */
-        .draggable-label {
-            font-weight: normal; 
-            font-family: "Microsoft JhengHei", "Arial", sans-serif;
-            
-            display: flex;
-            flex-direction: column; /* 垂直堆疊 */
-            align-items: center;
-            line-height: 1;
-            
-            cursor: grab; 
-            user-select: none;
-            
-            /* 強力白邊 */
-            -webkit-text-stroke: 3.5px white; 
-            paint-order: stroke fill; 
-            text-shadow: 2px 0 #fff, -2px 0 #fff, 0 2px #fff, 0 -2px #fff;
+        /* 路線標籤樣式 */
+        .route-label {
+            background: transparent !important; border: none !important; box-shadow: none !important; font-weight: 900 !important; font-family: "Microsoft JhengHei", "Arial", sans-serif; white-space: nowrap !important; 
+            -webkit-text-stroke: 4px white; paint-order: stroke fill; 
+            text-shadow: 3px 0 #fff, -3px 0 #fff, 0 3px #fff, 0 -3px #fff, 2px 2px #fff, -2px -2px #fff, 2px -2px #fff, -2px 2px #fff, 1px 1px #fff, -1px -1px #fff, 1px -1px #fff, -1px 1px #fff !important;
+            pointer-events: none; opacity: 1 !important; display: flex !important; align-items: center; justify-content: center;
         }
-        .draggable-label:active { cursor: grabbing; }
-
-        /* 車號部分 (橫式) */
-        .label-main {
-            white-space: nowrap;
-            display: block;
-        }
-
-        /* 後綴部分 (直式) */
-        .label-suffix {
-            writing-mode: vertical-rl; /* 直書模式 */
-            text-orientation: upright; /* 文字正向 */
-            letter-spacing: -1px;      /* 稍微緊湊 */
-            margin-top: 2px;           /* 與車號距離 */
-        }
-
+        .draggable-label { display: block !important; white-space: nowrap !important; line-height: 1.1; text-shadow: inherit; -webkit-text-stroke: inherit; }
         .leaflet-div-icon { background: transparent; border: none; }
+        .lm-icon { font-size: 24px; text-align: center; line-height: 1; text-shadow: 0 0 3px white; }
+
+        #selectedDistricts { display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 15px; }
+        .district-tag {
+            background-color: #e6f3ff; border: 1px solid #007bff; color: #0056b3;
+            padding: 4px 8px; border-radius: 15px; font-size: 13px; display: flex; align-items: center; animation: fadeIn 0.2s;
+        }
+        .tag-remove { margin-left: 6px; cursor: pointer; font-weight: bold; color: #999; font-size: 16px; line-height: 1; }
+        .tag-remove:hover { color: #dc3545; }
+        @keyframes fadeIn { from { opacity: 0; transform: scale(0.9); } to { opacity: 1; transform: scale(1); } }
     </style>
 </head>
 <body>
@@ -145,6 +150,19 @@
         <div class="header"><h1 style="margin:0; font-size:20px;">🚌 全台公車地圖</h1></div>
         <div id="debug-info">系統訊息：初始化中...</div>
         <div class="controls">
+            
+            <label>🗺️ 行政區定位 (可多選)</label>
+            <div class="district-controls">
+                <select id="citySelect" onchange="filterDistricts()">
+                    <option value="">選擇縣市...</option>
+                </select>
+                <select id="districtSelect" disabled>
+                    <option value="">選擇區域...</option>
+                </select>
+                <button class="btn-add-district" onclick="addDistrict()">+</button>
+            </div>
+            <div id="selectedDistricts"></div>
+
             <div class="search-box">
                 <label>🔍 快速搜尋</label>
                 <input type="text" id="searchInput" placeholder="輸入路線 (如: 307, 統聯)..." autocomplete="off">
@@ -181,19 +199,261 @@
         function stopResize() { isResizing = false; resizer.classList.remove('active'); document.body.style.cursor = 'default'; document.removeEventListener('mousemove', handleMouseMove); document.removeEventListener('mouseup', stopResize); map.invalidateSize(); }
 
         var geoData = null;
+        var lmData = null; 
+        var distData = null;
+        var selectedDistrictFeatures = {};
+        var combinedLayer = null;
         var busStructure = {}; 
         var operatorLocations = {};
         var activeLayers = {}; 
         var allRouteNames = []; 
+        var landmarkLayers = { 'school': [], 'hospital': [], 'mall': [], 'station': [] }; 
+        var lmSize = 24; 
 
-        var legend = L.control({position: 'topright'});
-        legend.onAdd = function (map) {
-            var div = L.DomUtil.create('div', 'legend');
-            div.id = 'map-legend';
-            div.innerHTML = '<h4>圖例</h4><div id="legend-content">無顯示路線</div>';
+        var lmControl = L.control({position: 'topright'});
+        lmControl.onAdd = function (map) {
+            var div = L.DomUtil.create('div', 'landmark-panel');
+            L.DomEvent.disableClickPropagation(div);
+            L.DomEvent.disableScrollPropagation(div);
+            div.innerHTML = `
+                <h4>📍 地標顯示</h4>
+                <label class="lm-item"><input type="checkbox" onchange="toggleLandmarks('school', this.checked)"> 🏫 學校</label>
+                <label class="lm-item"><input type="checkbox" onchange="toggleLandmarks('hospital', this.checked)"> 🏥 醫院</label>
+                <label class="lm-item"><input type="checkbox" onchange="toggleLandmarks('mall', this.checked)"> 🛍️ 百貨/商場</label>
+                <label class="lm-item"><input type="checkbox" onchange="toggleLandmarks('station', this.checked)"> 🚇 車站/捷運</label>
+                <div class="lm-slider-container">
+                    <span class="lm-slider-label">圖標大小</span>
+                    <input type="range" min="12" max="48" value="24" oninput="updateLandmarkSize(this.value)">
+                </div>
+            `;
             return div;
         };
-        legend.addTo(map);
+        lmControl.addTo(map);
+
+        function showMsg(msg, isError=false) {
+            var d = document.getElementById('debug-info');
+            d.style.display = 'block'; d.innerText = msg;
+            d.style.background = isError ? '#f8d7da' : '#d4edda'; d.style.color = isError ? '#721c24' : '#155724';
+        }
+
+        var fileUrl = 'data/bus_web.geojson?t=' + new Date().getTime();
+        fetch(fileUrl).then(res => res.json()).then(data => {
+            geoData = data;
+            if (!data.features || data.features.length === 0) { showMsg("⚠️ 無公車資料！", true); return; }
+            document.getElementById('operatorSelect').innerHTML = '<option value="">請選擇業者</option>';
+            processData(); showMsg("✅ 公車資料載入成功！");
+            fetchLandmarks();
+            fetchDistricts();
+        }).catch(err => showMsg("❌ 讀取失敗：" + err, true));
+
+        function fetchLandmarks() {
+            fetch('data/landmarks.geojson?t=' + new Date().getTime())
+                .then(res => { if(!res.ok) throw new Error("無地標檔"); return res.json(); })
+                .then(data => { lmData = data; console.log("地標資料載入成功"); })
+                .catch(err => console.log("地標載入略過"));
+        }
+        
+        var countyList = [
+            '臺北市', '新北市', '桃園市', '臺中市', '臺南市', '高雄市',
+            '基隆市', '新竹市', '嘉義市', '新竹縣', '苗栗縣', '彰化縣', 
+            '南投縣', '雲林縣', '嘉義縣', '屏東縣', '宜蘭縣', '花蓮縣', 
+            '臺東縣', '澎湖縣', '金門縣', '連江縣'
+        ]; 
+
+        function fetchDistricts() {
+            fetch('data/districts.geojson?t=' + new Date().getTime())
+                .then(res => { if(!res.ok) throw new Error("無行政區檔"); return res.json(); })
+                .then(data => { 
+                    distData = data; 
+                    var citySel = document.getElementById('citySelect');
+                    if(citySel){
+                        citySel.innerHTML = '<option value="">選擇縣市...</option>';
+                        countyList.forEach(c => {
+                            var opt = document.createElement('option');
+                            opt.value = c; opt.textContent = c; citySel.appendChild(opt);
+                        });
+                    }
+                    console.log("行政區資料 OK");
+                })
+                .catch(err => console.log("行政區載入失敗"));
+        }
+        
+        function filterDistricts() {
+            var city = document.getElementById('citySelect').value;
+            var distSel = document.getElementById('districtSelect');
+            distSel.innerHTML = '<option value="">選擇區域...</option>';
+            distSel.disabled = !city;
+
+            if (city && distData) {
+                var districts = distData.features.filter(f => 
+                    f.properties.type === 'district' && f.properties.parent === city
+                );
+                
+                districts.sort((a, b) => a.properties.name.localeCompare(b.properties.name, 'zh-TW'));
+                
+                districts.forEach(d => {
+                     var opt = document.createElement('option');
+                     opt.value = d.properties.name;
+                     opt.textContent = d.properties.name;
+                     distSel.appendChild(opt);
+                });
+            }
+        }
+
+        function addDistrict() {
+            var name = document.getElementById('districtSelect').value;
+            var city = document.getElementById('citySelect').value;
+            
+            var targetName = name || city;
+            if (!targetName) return alert("請先選擇行政區！");
+            
+            var uniqueId = city + "_" + targetName;
+
+            if (selectedDistrictFeatures[uniqueId]) {
+                updateDistrictMap(true); 
+                return;
+            }
+            
+            var targetType = name ? 'district' : 'county';
+            var feature = distData.features.find(f => 
+                f.properties.name === targetName && 
+                f.properties.type === targetType && 
+                (targetType === 'county' || f.properties.parent === city)
+            );
+
+            if (feature) {
+                selectedDistrictFeatures[uniqueId] = feature;
+                createDistrictTag(targetName, uniqueId);
+                updateDistrictMap(true); 
+            } else {
+                 var fb = distData.features.find(f => f.properties.name === targetName && f.properties.type === targetType);
+                 if(fb) {
+                     selectedDistrictFeatures[uniqueId] = fb;
+                     createDistrictTag(targetName, uniqueId);
+                     updateDistrictMap(true);
+                 } else {
+                     alert("找不到該區域資料");
+                 }
+            }
+        }
+
+        // --- 【關鍵修正】只畫外框 (移除內部的碎線) ---
+        function updateDistrictMap(fitView) {
+            if (combinedLayer) {
+                map.removeLayer(combinedLayer);
+                combinedLayer = null;
+            }
+
+            var ids = Object.keys(selectedDistrictFeatures);
+            if (ids.length === 0) return;
+
+            var unionFeature = null;
+
+            try {
+                // 1. 收集所有需要合併的幾何 (Geometry)
+                var polys = [];
+                
+                for (var i = 0; i < ids.length; i++) {
+                    var feature = selectedDistrictFeatures[ids[i]];
+                    // 必須確保是 Polygon 或 MultiPolygon 才能 union
+                    if (feature.geometry.type === 'Polygon') {
+                        polys.push(turf.polygon(feature.geometry.coordinates));
+                    } else if (feature.geometry.type === 'MultiPolygon') {
+                        polys.push(turf.multiPolygon(feature.geometry.coordinates));
+                    }
+                }
+
+                // 2. 進行合併 (Union)
+                if (polys.length > 0) {
+                    unionFeature = polys[0]; // 初始值
+                    for (var j = 1; j < polys.length; j++) {
+                        // 逐一合併
+                        unionFeature = turf.union(unionFeature, polys[j]);
+                    }
+                }
+                
+            } catch (e) {
+                console.error("合併失敗，改為繪製獨立區塊", e);
+                // 失敗時 fallback
+                unionFeature = {
+                    type: "FeatureCollection",
+                    features: Object.values(selectedDistrictFeatures)
+                };
+            }
+
+            // 3. 繪製合併後的多邊形 (只有外框)
+            if (unionFeature) {
+                combinedLayer = L.geoJSON(unionFeature, {
+                    style: {
+                        color: '#007bff',      // 藍色
+                        weight: 5,             // 粗框
+                        dashArray: '8, 8',     // 虛線
+                        fillColor: '#007bff',
+                        fillOpacity: 0         // 內部完全透明
+                    }
+                }).addTo(map);
+
+                if (fitView) {
+                    map.fitBounds(combinedLayer.getBounds());
+                }
+            }
+        }
+
+        function createDistrictTag(name, id) {
+            var container = document.getElementById('selectedDistricts');
+            var tag = document.createElement('div');
+            tag.className = 'district-tag';
+            tag.style.borderColor = '#007bff';
+            tag.style.color = '#0056b3'; 
+            tag.innerHTML = `<span style="display:inline-block;width:10px;height:10px;background:#007bff;margin-right:5px;border-radius:50%;"></span>
+                             ${name} 
+                             <span class="tag-remove" onclick="removeDistrict('${id}', this)">×</span>`;
+            container.appendChild(tag);
+        }
+
+        window.removeDistrict = function(id, btn) {
+            if (selectedDistrictFeatures[id]) {
+                delete selectedDistrictFeatures[id];
+                updateDistrictMap(false); 
+            }
+            if (btn) btn.parentElement.remove();
+        }
+
+        function toggleLandmarks(category, isChecked) {
+            if (!lmData) return alert("地標資料尚未載入");
+            if (isChecked) {
+                var features = lmData.features.filter(f => f.properties.c === category);
+                features.forEach(f => {
+                    var iconChar = category === 'school' ? '🏫' : category === 'hospital' ? '🏥' : category === 'mall' ? '🛍️' : '🚇';
+                    var myIcon = L.divIcon({
+                        className: 'lm-icon-container',
+                        html: `<div class="lm-icon" style="font-size: ${lmSize}px;">${iconChar}</div>`,
+                        iconSize: [null, null]
+                    });
+                    var marker = L.marker([f.geometry.coordinates[1], f.geometry.coordinates[0]], {icon: myIcon}).bindPopup(f.properties.n);
+                    marker.addTo(map);
+                    landmarkLayers[category].push(marker);
+                });
+            } else {
+                landmarkLayers[category].forEach(m => map.removeLayer(m));
+                landmarkLayers[category] = [];
+            }
+        }
+
+        function updateLandmarkSize(newSize) {
+            lmSize = newSize;
+            ['school', 'hospital', 'mall', 'station'].forEach(cat => {
+                landmarkLayers[cat].forEach(marker => {
+                    var iconChar = cat === 'school' ? '🏫' : cat === 'hospital' ? '🏥' : cat === 'mall' ? '🛍️' : '🚇';
+                    var newIcon = L.divIcon({
+                        className: 'lm-icon-container',
+                        html: `<div class="lm-icon" style="font-size: ${newSize}px;">${iconChar}</div>`,
+                        iconSize: [null, null]
+                    });
+                    marker.setIcon(newIcon);
+                });
+            });
+        }
 
         map.on('zoomend', function() {
             var currentZoom = map.getZoom();
@@ -205,92 +465,21 @@
             });
         });
 
-        // --- 【關鍵修改】智慧標籤產生器 ---
         function createLabelHTML(name, color, size) {
-            // 邏輯：找到字串中最後一個數字的位置
-            // 匹配模式：前面是一串包含數字/英文/顏色的字，後面接任意其他字
-            // 簡單解法：找到最後一個 [0-9] 的索引位置，在那之後切斷
-            
-            var splitIndex = -1;
-            
-            // 從後面往前找最後一個數字
-            for (var i = name.length - 1; i >= 0; i--) {
-                if (/[0-9]/.test(name[i])) {
-                    splitIndex = i + 1; // 切割點在數字後面
-                    break;
-                }
-            }
-
-            var mainText = name;
-            var suffixText = "";
-
-            if (splitIndex > 0 && splitIndex < name.length) {
-                mainText = name.substring(0, splitIndex);
-                suffixText = name.substring(splitIndex);
-            }
-
-            // 如果沒有數字，則檢查括號 (相容舊邏輯)
-            if (splitIndex === -1 && name.indexOf('(') !== -1) {
-                let parts = name.split('(');
-                mainText = parts[0];
-                suffixText = '(' + parts.slice(1).join('(');
-            }
-
-            let html = `<div class="draggable-label" style="color: ${color}; font-size: ${size}px;">
-                            <span class="label-main">${mainText}</span>`;
-            
-            if (suffixText) {
-                html += `<span class="label-suffix">${suffixText}</span>`;
-            }
-            html += `</div>`;
-            return html;
+            return `<div class="draggable-label route-label" style="color: ${color}; font-size: ${size}px;">
+                        ${name}
+                    </div>`;
         }
 
         function updateLabelContent(obj, zoom) {
             var scaleFactor = Math.pow(1.15, zoom - 12); 
             var newSize = Math.max(10, obj.baseFontSize * scaleFactor); 
-            
-            var el = obj.labelMarker.getElement();
-            if (el) {
-                var icon = obj.labelMarker.getIcon();
+            if (obj.labelMarker) {
                 var newHtml = createLabelHTML(obj.name, obj.color, newSize);
-                
-                var newIcon = L.divIcon({
-                    className: 'custom-label-icon',
-                    html: newHtml,
-                    iconSize: [null, null],
-                    iconAnchor: [20, 10]
-                });
+                var newIcon = L.divIcon({ className: 'custom-label-icon', html: newHtml, iconSize: [null, null], iconAnchor: [20, 10] });
                 obj.labelMarker.setIcon(newIcon);
             }
         }
-
-        function updateLegend() {
-            var container = document.getElementById('legend-content');
-            var routes = Object.keys(activeLayers);
-            if (routes.length === 0) { container.innerHTML = '<span style="color:#999">無顯示路線</span>'; return; }
-            var html = '';
-            routes.forEach(key => {
-                var o = activeLayers[key];
-                var h = Math.max(2, Math.min(12, o.weight));
-                html += `<div class="legend-item"><span>${o.name}</span><span class="legend-line" style="background:${o.color}; height:${h}px;"></span></div>`;
-            });
-            container.innerHTML = html;
-        }
-
-        function showMsg(msg, isError=false) {
-            var d = document.getElementById('debug-info');
-            d.style.display = 'block'; d.innerText = msg;
-            d.style.background = isError ? '#f8d7da' : '#d4edda'; d.style.color = isError ? '#721c24' : '#155724';
-        }
-
-        var fileUrl = 'data/bus_web.geojson?t=' + new Date().getTime();
-        fetch(fileUrl).then(res => res.json()).then(data => {
-            geoData = data;
-            if (!data.features || data.features.length === 0) { showMsg("⚠️ 無資料！", true); return; }
-            document.getElementById('operatorSelect').innerHTML = '<option value="">請選擇業者</option>';
-            processData(); showMsg("✅ 資料載入成功！共 " + data.features.length + " 筆");
-        }).catch(err => showMsg("❌ 讀取失敗：" + err, true));
 
         const REGIONS = {
             "北部地區": ["臺北市", "Taipei", "新北市", "NewTaipei", "基隆市", "Keelung", "桃園市", "Taoyuan", "新竹市", "Hsinchu", "新竹縣", "HsinchuCounty", "苗栗縣", "MiaoliCounty"],
@@ -387,7 +576,7 @@
 
             var color = '#' + Math.floor(Math.random()*16777215).toString(16).padStart(6, '0');
             var weight = 5;
-            var fontSize = 40;
+            var fontSize = 45;
 
             var layer = L.geoJSON(features, { style: { color: color, weight: weight, opacity: 0.8 }, onEachFeature: function(feature, layer) { layer.bindPopup(`<b>${name}</b><br>${feature.properties.Operator}<br>(${feature.properties.City})`); } }).addTo(map);
             
@@ -399,21 +588,12 @@
                 var latlngs = longestLayer.getLatLngs();
                 var centerLatLng = latlngs[Math.floor(latlngs.length / 2)]; 
                 
-                // 使用新邏輯生成 HTML
                 var html = createLabelHTML(name, color, fontSize);
-                var myIcon = L.divIcon({ 
-                    className: 'custom-label-icon', 
-                    html: html,
-                    iconSize: [null, null], 
-                    iconAnchor: [20, 10] 
-                });
+                var myIcon = L.divIcon({ className: 'custom-label-icon', html: html, iconSize: [null, null], iconAnchor: [20, 10] });
                 labelMarker = L.marker(centerLatLng, { icon: myIcon, draggable: true, autoPan: true }).addTo(map);
             }
 
-            activeLayers[uniqueKey] = { 
-                layer: layer, color: color, weight: weight, 
-                baseFontSize: fontSize, name: name, labelMarker: labelMarker 
-            };
+            activeLayers[uniqueKey] = { layer: layer, color: color, weight: weight, baseFontSize: fontSize, name: name, labelMarker: labelMarker };
             map.fitBounds(layer.getBounds());
             createRouteCard(uniqueKey, name, opIdentifier, color, weight, fontSize);
             updateLegend();
@@ -457,7 +637,7 @@
             sizeGroup.className = 'slider-group';
             sizeGroup.innerHTML = `<svg class="slider-icon" viewBox="0 0 24 24"><path d="M2.5 4v3h5v12h3V7h5V4h-13zm19 5h-9v3h3v7h3v-7h3V9z"/></svg>`;
             var sizeInput = document.createElement('input');
-            sizeInput.type = 'range'; sizeInput.min = '12'; sizeInput.max = '80'; sizeInput.value = fontSize;
+            sizeInput.type = 'range'; sizeInput.min = '12'; sizeInput.max = '120'; sizeInput.value = fontSize;
             sizeInput.oninput = function() { updateRouteStyle(key, colorInput.value, weightInput.value, this.value); };
             sizeGroup.appendChild(sizeInput);
 
@@ -481,14 +661,16 @@
                 newWeight = parseInt(newWeight);
                 newSize = parseInt(newSize);
                 var obj = activeLayers[key];
-                
                 obj.layer.setStyle({ color: newColor, weight: newWeight });
-                obj.color = newColor; obj.weight = newWeight; obj.baseFontSize = newSize;
-                
                 if (obj.labelMarker) {
                     updateLabelContent(obj, map.getZoom());
+                    var el = obj.labelMarker.getElement();
+                    if (el) {
+                        var spans = el.querySelectorAll('.draggable-label');
+                        spans.forEach(s => s.style.color = newColor);
+                    }
                 }
-
+                obj.color = newColor; obj.weight = newWeight; obj.baseFontSize = newSize;
                 document.getElementById('card-' + key).style.setProperty('--route-color', newColor);
                 updateLegend();
             }
@@ -501,6 +683,14 @@
                 delete activeLayers[key]; 
             }
             var card = document.getElementById('card-' + key); if (card) card.remove(); updateLegend();
+            
+            if (window.removeDistrict) {
+               var possibleDistName = key.split('_')[0];
+               var tags = document.querySelectorAll('.district-tag');
+               tags.forEach(t => {
+                   if (t.innerText.includes(possibleDistName)) t.remove();
+               });
+            }
         }
     </script>
 </body>
