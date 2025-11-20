@@ -3,16 +3,58 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>全台公車路線地圖 (極簡面板版)</title>
+    <title>全台公車路線地圖 v1.5</title>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <style>
         body { margin: 0; display: flex; height: 100vh; font-family: "Microsoft JhengHei", "Heiti TC", sans-serif; overflow: hidden; }
         
+        /* --- 側邊欄 (含收合動畫) --- */
         #sidebar { 
-            width: 420px; min-width: 350px; max-width: 800px;
-            background: #fff; z-index: 2000; display: flex; flex-direction: column; flex-shrink: 0; 
+            width: 420px; 
+            min-width: 350px; 
+            max-width: 800px;
+            background: #fff; 
+            z-index: 2000; 
+            display: flex; 
+            flex-direction: column; 
+            flex-shrink: 0; 
+            transition: width 0.3s ease, min-width 0.3s ease; /* 平滑動畫 */
+            position: relative;
+            box-shadow: 2px 0 5px rgba(0,0,0,0.1);
         }
 
+        /* 收合狀態：變成細條 */
+        #sidebar.collapsed {
+            width: 24px !important;
+            min-width: 24px !important;
+            background: #f8f9fa;
+            cursor: pointer;
+            border-right: 1px solid #ccc;
+            overflow: hidden; /* 隱藏內部內容 */
+        }
+        
+        /* 收合時隱藏內容區塊 */
+        #sidebar.collapsed .header,
+        #sidebar.collapsed .controls,
+        #sidebar.collapsed #route-list {
+            display: none !important;
+        }
+
+        /* 側邊欄展開觸發區 (僅在收合時顯示) */
+        #sidebar-expander {
+            display: none;
+            height: 100%;
+            width: 100%;
+            align-items: center;
+            justify-content: center;
+            color: #666;
+            font-weight: bold;
+            font-size: 14px;
+        }
+        #sidebar.collapsed #sidebar-expander { display: flex; }
+        #sidebar-expander:hover { background: #e0e0e0; color: #000; }
+
+        /* 拖曳手把 */
         #resizer {
             width: 8px; background-color: #f1f1f1; border-left: 1px solid #ddd; border-right: 1px solid #ddd;
             cursor: col-resize; flex-shrink: 0; display: flex; align-items: center; justify-content: center;
@@ -20,15 +62,31 @@
         }
         #resizer:hover, #resizer.active { background-color: #ccc; }
         #resizer::after { content: "|||"; color: #999; font-size: 10px; font-weight: bold; letter-spacing: 1px; transform: rotate(90deg); }
+        /* 收合時隱藏手把 */
+        #sidebar.collapsed + #resizer { display: none; }
 
-        .header { padding: 20px; background: #007bff; color: white; }
-        .controls { padding: 20px; border-bottom: 1px solid #eee; }
+        /* 標題列 */
+        .header { 
+            padding: 15px 20px; background: #007bff; color: white; 
+            display: flex; justify-content: space-between; align-items: center;
+            flex-shrink: 0;
+        }
+        .header h1 { margin: 0; font-size: 20px; }
+        
+        /* 收合按鈕 */
+        #btnCollapse {
+            background: none; border: none; color: white; font-size: 18px; cursor: pointer; padding: 5px;
+        }
+        #btnCollapse:hover { opacity: 0.8; }
+
+        .controls { padding: 20px; border-bottom: 1px solid #eee; flex-shrink: 0; overflow-y: auto; max-height: 60vh; }
         
         label { font-size: 16px; color: #333; font-weight: bold; display: block; margin-bottom: 5px; margin-top: 15px; }
         label:first-child { margin-top: 0; }
 
         select, button, input[type="text"] { width: 100%; padding: 10px; margin-bottom: 10px; border: 1px solid #999; border-radius: 4px; box-sizing: border-box; font-size: 14px; }
         
+        /* 行政區選單 */
         .district-controls { display: flex; flex-direction: column; gap: 10px; margin-bottom: 10px; }
         .district-controls select { width: 100%; margin-bottom: 0; }
 
@@ -71,7 +129,7 @@
             border-left: 8px solid var(--route-color, #ccc); 
             transition: border-color 0.3s, box-shadow 0.3s;
             display: flex; align-items: center; gap: 15px; overflow: hidden; 
-            min-height: 50px; 
+            min-height: 50px; position: relative;
         }
         .route-item:hover { box-shadow: 0 4px 12px rgba(0,0,0,0.12); }
 
@@ -81,12 +139,11 @@
 
         .style-controls {
             flex-grow: 1; flex-shrink: 1; min-width: 100px; display: flex; align-items: center; gap: 8px; padding: 0; height: 100%; 
+            margin-right: 30px; /* 留給垃圾桶 */
         }
         input[type="color"] { border: 1px solid #ddd; width: 28px; height: 28px; cursor: pointer; background: none; padding: 0; border-radius: 4px; flex-shrink: 0; }
         
-        .sliders-container {
-            display: flex; flex-direction: column; justify-content: center; gap: 6px; flex-grow: 1; width: 100%;
-        }
+        .sliders-container { display: flex; flex-direction: column; justify-content: center; gap: 6px; flex-grow: 1; width: 100%; }
         .slider-group { display: flex; align-items: center; gap: 6px; width: 100%; height: 16px; }
         .slider-icon { width: 12px; height: 12px; fill: #888; flex-shrink: 0; }
 
@@ -99,6 +156,7 @@
         }
 
         .btn-del { 
+            position: absolute; right: 10px; top: 50%; transform: translateY(-50%);
             border: none; background: none; cursor: pointer; padding: 0; margin: 0;
             flex-shrink: 0; width: 36px; height: 36px; display: flex; align-items: center; justify-content: center;
             border-radius: 50%; transition: background-color 0.2s; line-height: 0; 
@@ -109,44 +167,35 @@
 
         #map { flex: 1; height: 100%; position: relative; z-index: 1; }
         
-        /* --- 地標面板 (極簡版) --- */
+        /* 地標面板 */
         .landmark-panel { 
             background: white; padding: 10px 15px; 
-            box-shadow: 0 0 15px rgba(0,0,0,0.3) !important; border-radius: 8px; min-width: 180px; 
+            box-shadow: 0 0 15px rgba(0,0,0,0.3) !important; border-radius: 8px; min-width: 200px; 
             font-size: 14px; color: #333; cursor: default; z-index: 3000; border: 1px solid #ddd;
             transition: all 0.3s ease;
         }
-        /* 標題列 (只剩按鈕) */
-        .panel-header { 
-            display: flex; justify-content: flex-end; /* 靠右對齊 */
-            margin-bottom: 0; padding-bottom: 0; border: none;
-        }
-        /* 收合按鈕 */
-        .panel-toggle-btn { 
-            background: none; border: none; cursor: pointer; font-size: 16px; color: #666; padding: 0; 
-            line-height: 1;
-        }
+        .panel-header { display: flex; justify-content: flex-end; margin-bottom: 0; padding-bottom: 0; }
+        .panel-toggle-btn { background: none; border: none; cursor: pointer; font-size: 16px; color: #666; padding: 0; line-height: 1; }
         .panel-toggle-btn:hover { color: #000; }
+        .panel-content { display: block; margin-top: 5px; }
 
         .lm-item { display: flex; align-items: center; margin-bottom: 8px; cursor: pointer; }
         .lm-item input { margin-right: 8px; cursor: pointer; }
         .lm-slider-container { margin-top: 10px; border-top: 1px solid #eee; padding-top: 10px; }
         .lm-slider-label { font-size: 12px; color: #666; margin-bottom: 5px; display: block; }
 
-        /* 收合時的內容隱藏 */
-        .panel-content { display: block; margin-top: 5px; }
-
         #debug-info { padding: 10px; background: #fff3cd; color: #856404; font-size: 12px; border-bottom: 1px solid #ffeeba; display: none;}
         
-        /* 路線標籤樣式 */
+        /* 路線標籤 (橫式 + 白邊) */
         .route-label {
             background: transparent !important; border: none !important; box-shadow: none !important; 
             font-weight: 900 !important; font-family: "Microsoft JhengHei", "Arial", sans-serif; white-space: nowrap !important; 
             -webkit-text-stroke: 4px white; paint-order: stroke fill; 
-            text-shadow: 3px 0 #fff, -3px 0 #fff, 0 3px #fff, 0 -3px #fff, 2px 2px #fff, -2px -2px #fff, 2px -2px #fff, -2px 2px #fff, 1px 1px #fff, -1px -1px #fff, 1px -1px #fff, -1px 1px #fff !important;
+            text-shadow: 3px 0 0 #fff, -3px 0 0 #fff, 0 3px 0 #fff, 0 -3px 0 #fff, 2px 2px 0 #fff, -2px -2px 0 #fff, 2px -2px 0 #fff, -2px 2px 0 #fff, 1px 1px 0 #fff, -1px -1px 0 #fff, 1px -1px 0 #fff, -1px 1px 0 #fff !important;
             pointer-events: none; opacity: 1 !important; display: flex !important; align-items: center; justify-content: center;
         }
         .draggable-label { display: block !important; white-space: nowrap !important; line-height: 1.1; text-shadow: inherit; -webkit-text-stroke: inherit; }
+
         .leaflet-div-icon { background: transparent; border: none; }
         .lm-icon { font-size: 24px; text-align: center; line-height: 1; text-shadow: 0 0 3px white; }
 
@@ -160,7 +209,7 @@
         .tag-remove:hover { color: #dc3545; }
         @keyframes fadeIn { from { opacity: 0; transform: scale(0.9); } to { opacity: 1; transform: scale(1); } }
         
-        /* 右下角截圖按鈕 */
+        /* 截圖按鈕 */
         #btnSnapshot {
             position: absolute; bottom: 30px; right: 30px; z-index: 3000;
             width: 56px; height: 56px; background: rgba(0, 0, 0, 0.4); border: 2px solid rgba(255, 255, 255, 0.3);
@@ -174,11 +223,11 @@
 
     <div id="sidebar">
         <div class="header">
-            <h1 style="margin:0; font-size:20px;">🚌 全台公車地圖</h1>
+            <h1 style="margin:0; font-size:20px;">🚌 全台公車地圖 v1.5</h1>
             <button id="btnCollapse" onclick="toggleSidebar()" title="收合側邊欄">◀</button>
         </div>
         
-        <div id="sidebar-expander" onclick="toggleSidebar()" title="展開側邊欄" style="display:none; height:100%; align-items:center; justify-content:center; cursor:pointer; color:#666; font-weight:bold;">▶</div>
+        <div id="sidebar-expander" onclick="toggleSidebar()" title="展開側邊欄">▶</div>
 
         <div id="sidebar-content">
             <div id="debug-info">系統訊息：初始化中...</div>
@@ -229,6 +278,21 @@
             attribution: '&copy; OpenStreetMap contributors'
         }).addTo(map);
 
+        const REGIONS = {
+            "北部地區": ["臺北市", "Taipei", "新北市", "NewTaipei", "基隆市", "Keelung", "桃園市", "Taoyuan", "新竹市", "Hsinchu", "新竹縣", "HsinchuCounty", "苗栗縣", "MiaoliCounty"],
+            "中部地區": ["臺中市", "Taichung", "彰化縣", "ChanghuaCounty", "南投縣", "NantouCounty", "雲林縣", "YunlinCounty", "嘉義市", "Chiayi", "嘉義縣", "ChiayiCounty"],
+            "南部地區": ["臺南市", "Tainan", "高雄市", "Kaohsiung", "屏東縣", "PingtungCounty"],
+            "東部與離島": ["宜蘭縣", "YilanCounty", "花蓮縣", "HualienCounty", "臺東縣", "TaitungCounty", "金門縣", "KinmenCounty", "澎湖縣", "PenghuCounty", "連江縣", "LienchiangCounty"],
+            "公路/跨區": ["公路/跨縣市", "公路客運", "InterCity"]
+        };
+        
+        var countyList = [
+            '臺北市', '新北市', '桃園市', '臺中市', '臺南市', '高雄市',
+            '基隆市', '新竹市', '嘉義市', '新竹縣', '苗栗縣', '彰化縣', 
+            '南投縣', '雲林縣', '嘉義縣', '屏東縣', '宜蘭縣', '花蓮縣', 
+            '臺東縣', '澎湖縣', '金門縣', '連江縣'
+        ]; 
+
         const sidebar = document.getElementById('sidebar');
         const sidebarContent = document.getElementById('sidebar-content');
         const sidebarExpander = document.getElementById('sidebar-expander');
@@ -238,21 +302,21 @@
         let sidebarWidth = 420; 
 
         function toggleSidebar() {
-            if (sidebar.style.width === '20px') {
+            if (sidebar.classList.contains('collapsed')) {
+                sidebar.classList.remove('collapsed');
                 sidebar.style.width = sidebarWidth + 'px';
                 sidebarContent.style.display = 'block';
-                sidebarExpander.style.display = 'none';
-                btnCollapse.style.display = 'block';
+                btnCollapse.textContent = '◀';
                 document.querySelector('.header h1').style.display = 'block';
+                btnCollapse.style.display = 'block';
                 resizer.style.display = 'flex';
             } else {
                 sidebarWidth = sidebar.offsetWidth;
-                sidebar.style.width = '20px';
-                sidebar.style.minWidth = '20px'; // 允許縮到最小
+                sidebar.classList.add('collapsed');
+                sidebar.style.width = ''; 
                 sidebarContent.style.display = 'none';
-                sidebarExpander.style.display = 'flex';
-                btnCollapse.style.display = 'none';
                 document.querySelector('.header h1').style.display = 'none';
+                btnCollapse.style.display = 'none';
                 resizer.style.display = 'none';
             }
             setTimeout(() => map.invalidateSize(), 300);
@@ -260,7 +324,7 @@
 
         let isResizing = false;
         resizer.addEventListener('mousedown', (e) => { 
-            if(sidebar.style.width === '20px') return; 
+            if(sidebar.classList.contains('collapsed')) return; 
             isResizing = true; resizer.classList.add('active'); document.body.style.cursor = 'col-resize'; 
             document.addEventListener('mousemove', handleMouseMove); document.addEventListener('mouseup', stopResize); e.preventDefault(); 
         });
@@ -311,15 +375,14 @@
         window.toggleLmPanel = function(btn) {
             var content = document.getElementById('lmContent');
             var panel = document.querySelector('.landmark-panel');
-            
             if (content.style.display === 'none') {
                 content.style.display = 'block';
                 btn.textContent = '▼';
-                panel.style.minWidth = '200px'; // 恢復寬度
+                panel.style.minWidth = '200px';
             } else {
                 content.style.display = 'none';
-                btn.textContent = '📍'; // 收合時顯示地標圖示
-                panel.style.minWidth = 'auto'; // 縮小寬度
+                btn.textContent = '📍'; 
+                panel.style.minWidth = 'auto'; 
                 panel.style.padding = '5px';
             }
         };
@@ -360,13 +423,6 @@
                 .catch(err => console.log("地標載入略過"));
         }
         
-        var countyList = [
-            '臺北市', '新北市', '桃園市', '臺中市', '臺南市', '高雄市',
-            '基隆市', '新竹市', '嘉義市', '新竹縣', '苗栗縣', '彰化縣', 
-            '南投縣', '雲林縣', '嘉義縣', '屏東縣', '宜蘭縣', '花蓮縣', 
-            '臺東縣', '澎湖縣', '金門縣', '連江縣'
-        ]; 
-
         function fetchDistricts() {
             fetch('data/districts.geojson?t=' + new Date().getTime())
                 .then(res => { if(!res.ok) throw new Error("無行政區檔"); return res.json(); })
@@ -438,14 +494,10 @@
                     if (feature.geometry.type === 'Polygon') polys.push(turf.polygon(feature.geometry.coordinates));
                     else if (feature.geometry.type === 'MultiPolygon') polys.push(turf.multiPolygon(feature.geometry.coordinates));
                 }
-
+                // 修正：合併重疊區域 (Union)
                 if (polys.length > 0) {
                     unionFeature = polys[0]; 
-                    // 【修正】不再合併 Union，而是改為 FeatureCollection 以保留獨立框線 (如果需要合併請取消註解下面這行)
-                    // for (var j = 1; j < polys.length; j++) { unionFeature = turf.union(unionFeature, polys[j]); }
-                    
-                    // 這裡改為 collection 讓每個區塊獨立顯示
-                    unionFeature = turf.featureCollection(polys);
+                    for (var j = 1; j < polys.length; j++) { unionFeature = turf.union(unionFeature, polys[j]); }
                 }
             } catch (e) {
                 unionFeature = { type: "FeatureCollection", features: Object.values(selectedDistrictFeatures) };
